@@ -1,4 +1,5 @@
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import type { Problem, User, Submission } from "@shared/schema";
 import { useAuth } from "@/lib/auth-context";
@@ -9,6 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest } from "@/lib/queryClient";
 import { 
   Users, 
   BookOpen, 
@@ -18,7 +24,8 @@ import {
   Settings,
   Shield,
   TrendingUp,
-  Activity
+  Activity,
+  KeyRound
 } from "lucide-react";
 
 function StatsCard({ 
@@ -64,6 +71,10 @@ function StatsCard({
 
 export default function AdminPage() {
   const { user, isAdmin } = useAuth();
+  const { toast } = useToast();
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [newPassword, setNewPassword] = useState("");
 
   const { data: problems, isLoading: problemsLoading } = useQuery<Problem[]>({
     queryKey: ["/api/problems"],
@@ -78,6 +89,48 @@ export default function AdminPage() {
     queryKey: ["/api/admin/submissions"],
     enabled: isAdmin,
   });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ userId, newPassword }: { userId: string; newPassword: string }) => {
+      const res = await apiRequest("POST", "/api/admin/reset-password", { userId, newPassword });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "تم بنجاح",
+        description: "تم تغيير كلمة المرور بنجاح",
+      });
+      setResetDialogOpen(false);
+      setSelectedUser(null);
+      setNewPassword("");
+    },
+    onError: () => {
+      toast({
+        title: "خطأ",
+        description: "فشل في تغيير كلمة المرور",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleResetPassword = () => {
+    if (!selectedUser || !newPassword) return;
+    if (newPassword.length < 6) {
+      toast({
+        title: "خطأ",
+        description: "كلمة المرور يجب أن تكون 6 أحرف على الأقل",
+        variant: "destructive",
+      });
+      return;
+    }
+    resetPasswordMutation.mutate({ userId: selectedUser.id, newPassword });
+  };
+
+  const openResetDialog = (student: User) => {
+    setSelectedUser(student);
+    setNewPassword("");
+    setResetDialogOpen(true);
+  };
 
   if (!isAdmin) {
     return (
@@ -184,6 +237,7 @@ export default function AdminPage() {
                           <TableHead className="text-right">اسم المستخدم</TableHead>
                           <TableHead className="text-right">الاسم</TableHead>
                           <TableHead className="text-right">الدور</TableHead>
+                          <TableHead className="text-right">الإجراءات</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -194,11 +248,22 @@ export default function AdminPage() {
                             <TableCell>
                               <Badge variant="secondary">طالب</Badge>
                             </TableCell>
+                            <TableCell>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openResetDialog(student)}
+                                data-testid={`button-reset-password-${student.id}`}
+                              >
+                                <KeyRound className="h-4 w-4 ml-1" />
+                                تغيير كلمة المرور
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         ))}
                         {users?.filter(u => u.role === "student").length === 0 && (
                           <TableRow>
-                            <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
+                            <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
                               لا يوجد طلاب مسجلين بعد
                             </TableCell>
                           </TableRow>
@@ -346,6 +411,47 @@ export default function AdminPage() {
           </Tabs>
         </div>
       </main>
+
+      {/* Password Reset Dialog */}
+      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>تغيير كلمة المرور</DialogTitle>
+            <DialogDescription>
+              تغيير كلمة المرور للطالب: {selectedUser?.displayName || selectedUser?.username}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="new-password">كلمة المرور الجديدة</Label>
+              <Input
+                id="new-password"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="أدخل كلمة المرور الجديدة (6 أحرف على الأقل)"
+                data-testid="input-new-password"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setResetDialogOpen(false)}
+              data-testid="button-cancel-reset"
+            >
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleResetPassword}
+              disabled={resetPasswordMutation.isPending || !newPassword}
+              data-testid="button-confirm-reset"
+            >
+              {resetPasswordMutation.isPending ? "جارٍ التغيير..." : "تغيير كلمة المرور"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

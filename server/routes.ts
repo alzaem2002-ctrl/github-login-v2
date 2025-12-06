@@ -254,6 +254,39 @@ export async function registerRoutes(
     }
   });
 
+  // Admin: Reset user password
+  app.post("/api/admin/reset-password", requireAdmin, async (req, res) => {
+    try {
+      const { userId, newPassword } = req.body;
+      
+      if (!userId || !newPassword) {
+        return res.status(400).json({ error: "يرجى تحديد المستخدم وكلمة المرور الجديدة" });
+      }
+      
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
+      }
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(404).json({ error: "المستخدم غير موجود" });
+      }
+      
+      if (user.role === "admin") {
+        return res.status(403).json({ error: "لا يمكن تغيير كلمة مرور المشرف" });
+      }
+      
+      const success = await storage.updateUserPassword(userId, newPassword);
+      if (success) {
+        res.json({ success: true, message: "تم تغيير كلمة المرور بنجاح" });
+      } else {
+        res.status(500).json({ error: "فشل في تغيير كلمة المرور" });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في الخادم" });
+    }
+  });
+
   // AI Routes (Gemini)
   app.post("/api/ai/evaluate", requireAuth, async (req, res) => {
     try {
