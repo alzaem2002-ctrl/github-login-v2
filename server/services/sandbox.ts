@@ -42,6 +42,20 @@ function executePythonLocally(code: string, testCases: TestCase[]): ExecutionRes
 
   for (const testCase of testCases) {
     try {
+      // Handle simple print statements (e.g., print('Hello'))
+      const simplePrintMatch = code.match(/print\s*\(\s*['"](.+)['"]\s*\)/);
+      if (simplePrintMatch && !testCase.input) {
+        const output = simplePrintMatch[1];
+        const passed = output === testCase.output;
+        results.push({
+          input: testCase.input || "",
+          output,
+          expected: testCase.output,
+          passed
+        });
+        continue;
+      }
+
       // Extract function call from input (e.g., "print(density(10, 5))")
       const funcMatch = testCase.input?.match(/print\((\w+)\((.*)\)\)/);
       if (!funcMatch) {
