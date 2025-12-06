@@ -64,6 +64,7 @@ export class MemStorage implements IStorage {
       title: "احسب الكثافة",
       description: "اكتب دالة باسم `density(mass, volume)` تُعيد الكثافة (الكتلة ÷ الحجم).",
       language: "python",
+      functionName: "density",
       difficulty: "easy",
       testCases: [
         { input: "print(density(10, 5))", output: "2.0" },
@@ -78,6 +79,7 @@ export class MemStorage implements IStorage {
       title: "قانون أوم",
       description: "اكتب دالة باسم `voltage(current, resistance)` تحسب فرق الجهد (V = I × R).",
       language: "python",
+      functionName: "voltage",
       difficulty: "medium",
       testCases: [
         { input: "print(voltage(2, 5))", output: "10" },
@@ -92,6 +94,7 @@ export class MemStorage implements IStorage {
       title: "الطاقة الحركية",
       description: "اكتب دالة باسم `kinetic_energy(mass, velocity)` تحسب KE = 0.5 × m × v².",
       language: "python",
+      functionName: "kinetic_energy",
       difficulty: "hard",
       testCases: [
         { input: "print(kinetic_energy(10, 4))", output: "80.0" },
@@ -137,9 +140,17 @@ export class MemStorage implements IStorage {
     return Array.from(this.problems.values());
   }
 
-  async createProblem(insertProblem: InsertProblem): Promise<Problem> {
-    const id = randomUUID();
-    const problem: Problem = { ...insertProblem, id };
+  async createProblem(insertProblem: InsertProblem & { id?: string }): Promise<Problem> {
+    const id = insertProblem.id || randomUUID();
+    const problem: Problem = { 
+      id,
+      title: insertProblem.title,
+      description: insertProblem.description,
+      language: insertProblem.language || "python",
+      functionName: insertProblem.functionName || "solve",
+      difficulty: insertProblem.difficulty || "medium",
+      testCases: insertProblem.testCases as { input: string; output: string }[]
+    };
     this.problems.set(id, problem);
     return problem;
   }
@@ -162,8 +173,14 @@ export class MemStorage implements IStorage {
   async createSubmission(insertSubmission: InsertSubmission): Promise<Submission> {
     const id = randomUUID();
     const submission: Submission = { 
-      ...insertSubmission, 
       id,
+      userId: insertSubmission.userId,
+      problemId: insertSubmission.problemId,
+      code: insertSubmission.code,
+      passed: insertSubmission.passed ?? false,
+      totalTests: insertSubmission.totalTests ?? 0,
+      passedTests: insertSubmission.passedTests ?? 0,
+      results: (insertSubmission.results as { input: string; expected: string; actual: string; passed: boolean }[]) ?? null,
       submittedAt: new Date()
     };
     this.submissions.set(id, submission);

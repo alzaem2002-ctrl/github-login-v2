@@ -35,13 +35,12 @@ export const problems = pgTable("problems", {
   title: text("title").notNull(),
   description: text("description").notNull(),
   language: text("language").notNull().default("python"),
+  functionName: text("function_name").notNull().default("solve"),
   testCases: jsonb("test_cases").notNull().$type<TestCase[]>(),
   difficulty: text("difficulty").default("medium"), // easy, medium, hard
 });
 
-export const insertProblemSchema = createInsertSchema(problems).omit({
-  id: true,
-});
+export const insertProblemSchema = createInsertSchema(problems);
 
 export type InsertProblem = z.infer<typeof insertProblemSchema>;
 export type Problem = typeof problems.$inferSelect;

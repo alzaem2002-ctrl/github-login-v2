@@ -2,6 +2,8 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { loginSchema, registerSchema, submitCodeSchema, type TestCase } from "@shared/schema";
+import { evaluateStudentCode, generateHint, generateProblem } from "./services/gemini";
+import { getNotionDatabases, syncProblemsFromNotion, saveSubmissionToNotion, testNotionConnection, createProblemInNotion } from "./services/notion";
 
 // Auth middleware
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -281,6 +283,145 @@ export async function registerRoutes(
       res.json(submissions);
     } catch (error) {
       res.status(500).json({ error: "حدث خطأ في الخادم" });
+    }
+  });
+
+  // AI Routes (Gemini)
+  app.post("/api/ai/evaluate", requireAuth, async (req, res) => {
+    try {
+      const { code, problemId } = req.body;
+      const problem = await storage.getProblem(problemId);
+      if (!problem) {
+        return res.status(404).json({ error: "المسألة غير موجودة" });
+      }
+
+      const result = await evaluateStudentCode(
+        code,
+        problem.title,
+        problem.description,
+        problem.functionName,
+        problem.testCases
+      );
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في تقييم الكود" });
+    }
+  });
+
+  app.post("/api/ai/hint", requireAuth, async (req, res) => {
+    try {
+      const { code, problemId } = req.body;
+      const problem = await storage.getProblem(problemId);
+      if (!problem) {
+        return res.status(404).json({ error: "المسألة غير موجودة" });
+      }
+
+      const hint = await generateHint(code, problem.title, problem.description);
+      res.json({ hint });
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في توليد التلميح" });
+    }
+  });
+
+  app.post("/api/ai/generate-problem", requireAdmin, async (req, res) => {
+    try {
+      const { topic, difficulty } = req.body;
+      const problem = await generateProblem(topic || "فيزياء", difficulty || "medium");
+      res.json(problem);
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في توليد المسألة" });
+    }
+  });
+
+  // Notion Routes
+  app.get("/api/notion/test", requireAdmin, async (req, res) => {
+    try {
+      const connected = await testNotionConnection();
+      res.json({ connected });
+    } catch (error) {
+      res.status(500).json({ error: "فشل الاتصال بـ Notion" });
+    }
+  });
+
+  app.get("/api/notion/databases", requireAdmin, async (req, res) => {
+    try {
+      const databases = await getNotionDatabases();
+      res.json(databases);
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في جلب قواعد البيانات" });
+    }
+  });
+
+  app.post("/api/notion/sync-problems", requireAdmin, async (req, res) => {
+    try {
+      const { databaseId } = req.body;
+      if (!databaseId) {
+        return res.status(400).json({ error: "يرجى تحديد قاعدة البيانات" });
+      }
+
+      const notionProblems = await syncProblemsFromNotion(databaseId);
+      
+      // Add problems to storage
+      for (const np of notionProblems) {
+        const existingProblem = await storage.getProblem(np.id);
+        if (!existingProblem) {
+          await storage.createProblem({
+            id: np.id,
+            title: np.title,
+            description: np.description,
+            difficulty: np.difficulty as "easy" | "medium" | "hard",
+            functionName: np.functionName,
+            testCases: np.testCases
+          });
+        }
+      }
+
+      res.json({ synced: notionProblems.length, problems: notionProblems });
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في مزامنة المسائل" });
+    }
+  });
+
+  app.post("/api/notion/save-submission", requireAdmin, async (req, res) => {
+    try {
+      const { databaseId, studentName, problemTitle, code, score, passed, feedback } = req.body;
+      if (!databaseId) {
+        return res.status(400).json({ error: "يرجى تحديد قاعدة البيانات" });
+      }
+
+      const saved = await saveSubmissionToNotion(databaseId, {
+        studentName,
+        problemTitle,
+        code,
+        score,
+        passed,
+        feedback
+      });
+
+      res.json({ saved });
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في حفظ النتيجة" });
+    }
+  });
+
+  app.post("/api/notion/create-problem", requireAdmin, async (req, res) => {
+    try {
+      const { databaseId, title, description, difficulty, functionName, testCases } = req.body;
+      if (!databaseId) {
+        return res.status(400).json({ error: "يرجى تحديد قاعدة البيانات" });
+      }
+
+      const created = await createProblemInNotion(databaseId, {
+        title,
+        description,
+        difficulty,
+        functionName,
+        testCases
+      });
+
+      res.json({ created });
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في إنشاء المسألة" });
     }
   });
 
