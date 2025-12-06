@@ -1,6 +1,11 @@
 import { Client } from "@notionhq/client";
 
-const notion = new Client({ auth: process.env.NOTION_API_KEY });
+function getNotionClient(): Client {
+  if (!process.env.NOTION_API_KEY) {
+    throw new Error("NOTION_API_KEY is not configured");
+  }
+  return new Client({ auth: process.env.NOTION_API_KEY });
+}
 
 export interface NotionProblem {
   id: string;
@@ -13,6 +18,7 @@ export interface NotionProblem {
 
 export async function getNotionDatabases(): Promise<{ id: string; title: string }[]> {
   try {
+    const notion = getNotionClient();
     const response = await notion.search({
       filter: { property: "object", value: "database" as any },
     });
@@ -29,31 +35,54 @@ export async function getNotionDatabases(): Promise<{ id: string; title: string 
 
 export async function syncProblemsFromNotion(databaseId: string): Promise<NotionProblem[]> {
   try {
-    const response = await (notion as any).databases.query({
-      database_id: databaseId,
+    const apiKey = process.env.NOTION_API_KEY;
+    if (!apiKey) {
+      throw new Error("NOTION_API_KEY is not configured");
+    }
+
+    // Clean API key from any invisible/RTL characters (U+200F is RTL mark often added in Arabic environments)
+    const cleanApiKey = apiKey.replace(/[^\x00-\x7F]/g, '').trim();
+
+    // Use direct API call since SDK v5 removed databases.query
+    const response = await fetch(`https://api.notion.com/v1/databases/${databaseId}/query`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${cleanApiKey}`,
+        "Content-Type": "application/json",
+        "Notion-Version": "2022-06-28"
+      },
+      body: JSON.stringify({})
     });
 
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error("Notion API error:", errorData);
+      throw new Error(`Notion API error: ${response.status}`);
+    }
+
+    const data = await response.json();
     const problems: NotionProblem[] = [];
 
-    for (const page of response.results as any[]) {
+    for (const page of data.results as any[]) {
       const props = page.properties;
       
-      const title = props.Title?.title?.[0]?.plain_text || 
-                    props.Name?.title?.[0]?.plain_text || 
-                    props.title?.title?.[0]?.plain_text || "";
+      // Support both Arabic and English property names
+      const title = props["الاسم"]?.title?.[0]?.plain_text || 
+                    props.Title?.title?.[0]?.plain_text || 
+                    props.Name?.title?.[0]?.plain_text || "";
       
-      const description = props.Description?.rich_text?.[0]?.plain_text || 
-                          props.description?.rich_text?.[0]?.plain_text || "";
+      const description = props["الوصف"]?.rich_text?.[0]?.plain_text || 
+                          props.Description?.rich_text?.[0]?.plain_text || "";
       
-      const difficulty = props.Difficulty?.select?.name || 
-                         props.difficulty?.select?.name || "easy";
+      const difficulty = props["الصعوبة"]?.select?.name || 
+                         props.Difficulty?.select?.name || "easy";
       
-      const functionName = props.FunctionName?.rich_text?.[0]?.plain_text || 
-                           props.function_name?.rich_text?.[0]?.plain_text || "";
+      const functionName = props["الدالة"]?.rich_text?.[0]?.plain_text || 
+                           props.FunctionName?.rich_text?.[0]?.plain_text || "";
       
       let testCases: { input: string; output: string }[] = [];
-      const testCasesRaw = props.TestCases?.rich_text?.[0]?.plain_text || 
-                           props.test_cases?.rich_text?.[0]?.plain_text || "";
+      const testCasesRaw = props["الاختبارات"]?.rich_text?.[0]?.plain_text || 
+                           props.TestCases?.rich_text?.[0]?.plain_text || "";
       
       if (testCasesRaw) {
         try {
@@ -94,6 +123,7 @@ export async function saveSubmissionToNotion(
   }
 ): Promise<boolean> {
   try {
+    const notion = getNotionClient();
     await notion.pages.create({
       parent: { database_id: databaseId },
       properties: {
@@ -146,6 +176,7 @@ export async function createProblemInNotion(
   }
 ): Promise<boolean> {
   try {
+    const notion = getNotionClient();
     await notion.pages.create({
       parent: { database_id: databaseId },
       properties: {
@@ -189,6 +220,7 @@ export async function syncAssignment(
   }
 ): Promise<string | null> {
   try {
+    const notion = getNotionClient();
     const response = await notion.pages.create({
       parent: { database_id: databaseId },
       properties: {
@@ -215,6 +247,7 @@ export async function syncAssignment(
 
 export async function testNotionConnection(): Promise<boolean> {
   try {
+    const notion = getNotionClient();
     await notion.users.me({});
     return true;
   } catch (error) {
