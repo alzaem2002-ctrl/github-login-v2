@@ -1,9 +1,10 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { loginSchema, registerSchema, submitCodeSchema, type TestCase } from "@shared/schema";
+import { loginSchema, registerSchema, submitCodeSchema } from "@shared/schema";
 import { evaluateStudentCode, generateHint, generateProblem } from "./services/gemini";
 import { getNotionDatabases, syncProblemsFromNotion, saveSubmissionToNotion, testNotionConnection, createProblemInNotion } from "./services/notion";
+import { executeCode } from "./services/sandbox";
 
 // Auth middleware
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -23,96 +24,6 @@ function requireAdmin(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// Simple Python code executor simulation
-function executePythonCode(code: string, testCases: TestCase[]): {
-  passed: boolean;
-  totalTests: number;
-  passedTests: number;
-  results: { input: string; expected: string; actual: string; passed: boolean }[];
-} {
-  const results: { input: string; expected: string; actual: string; passed: boolean }[] = [];
-  let passedTests = 0;
-
-  for (const testCase of testCases) {
-    try {
-      // Extract function call from input (e.g., "print(density(10, 5))")
-      const funcMatch = testCase.input.match(/print\((\w+)\((.*)\)\)/);
-      if (!funcMatch) {
-        results.push({
-          input: testCase.input,
-          expected: testCase.output,
-          actual: "Error: Invalid test case format",
-          passed: false
-        });
-        continue;
-      }
-
-      const funcName = funcMatch[1];
-      const argsStr = funcMatch[2];
-      const args = argsStr.split(',').map(a => parseFloat(a.trim()));
-
-      // Parse the user's Python code to extract function definition
-      let actual = "";
-      
-      // Simple evaluation based on expected functions
-      if (funcName === "density" && code.includes("def density")) {
-        // Check if user implemented return mass / volume
-        if (code.includes("return") && (code.includes("mass / volume") || code.includes("mass/volume"))) {
-          const mass = args[0];
-          const volume = args[1];
-          actual = String(mass / volume);
-        } else {
-          actual = "None";
-        }
-      } else if (funcName === "voltage" && code.includes("def voltage")) {
-        // Check if user implemented return current * resistance
-        if (code.includes("return") && (code.includes("current * resistance") || code.includes("current*resistance") || code.includes("* resistance") || code.includes("*resistance"))) {
-          const current = args[0];
-          const resistance = args[1];
-          const result = current * resistance;
-          actual = Number.isInteger(result) ? String(result) : String(result);
-        } else {
-          actual = "None";
-        }
-      } else if (funcName === "kinetic_energy" && code.includes("def kinetic_energy")) {
-        // Check if user implemented return 0.5 * mass * velocity ** 2
-        if (code.includes("return") && (code.includes("0.5") || code.includes("1/2") || code.includes("/ 2"))) {
-          const mass = args[0];
-          const velocity = args[1];
-          actual = String(0.5 * mass * velocity * velocity);
-        } else {
-          actual = "None";
-        }
-      } else {
-        actual = "Error: Function not found";
-      }
-
-      const passed = actual === testCase.output;
-      if (passed) passedTests++;
-
-      results.push({
-        input: testCase.input,
-        expected: testCase.output,
-        actual,
-        passed
-      });
-    } catch (error) {
-      results.push({
-        input: testCase.input,
-        expected: testCase.output,
-        actual: `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
-        passed: false
-      });
-    }
-  }
-
-  return {
-    passed: passedTests === testCases.length,
-    totalTests: testCases.length,
-    passedTests,
-    results
-  };
-}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -245,21 +156,45 @@ export async function registerRoutes(
         return res.status(404).json({ error: "المسألة غير موجودة" });
       }
 
-      // Execute code and get results
-      const executionResult = executePythonCode(code, problem.testCases);
+      // Execute code using sandbox service
+      const executionResult = await executeCode(code, problem.language, problem.testCases);
+
+      if (executionResult.error) {
+        return res.status(400).json({ error: executionResult.error });
+      }
+
+      const results = executionResult.results || [];
+      const passedTests = results.filter(r => r.passed).length;
+      const totalTests = results.length;
+      const passed = passedTests === totalTests;
 
       // Save submission with authenticated user
-      const submission = await storage.createSubmission({
+      await storage.createSubmission({
         userId,
         problemId,
         code,
-        passed: executionResult.passed,
-        totalTests: executionResult.totalTests,
-        passedTests: executionResult.passedTests,
-        results: executionResult.results
+        passed,
+        totalTests,
+        passedTests,
+        results: results.map(r => ({
+          input: r.input,
+          expected: r.expected,
+          actual: r.output,
+          passed: r.passed
+        }))
       });
 
-      res.json(executionResult);
+      res.json({
+        passed,
+        totalTests,
+        passedTests,
+        results: results.map(r => ({
+          input: r.input,
+          expected: r.expected,
+          actual: r.output,
+          passed: r.passed
+        }))
+      });
     } catch (error) {
       res.status(500).json({ error: "حدث خطأ في الخادم" });
     }
