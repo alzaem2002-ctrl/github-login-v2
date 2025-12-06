@@ -287,6 +287,68 @@ export async function registerRoutes(
     }
   });
 
+  // Admin: Bulk import students
+  app.post("/api/admin/bulk-import", requireAdmin, async (req, res) => {
+    try {
+      const { students } = req.body;
+      
+      if (!students || !Array.isArray(students) || students.length === 0) {
+        return res.status(400).json({ error: "يرجى تحديد قائمة الطلاب" });
+      }
+      
+      const results = {
+        success: 0,
+        failed: 0,
+        errors: [] as string[],
+        created: [] as { username: string; password: string; displayName: string; className: string }[]
+      };
+      
+      for (const student of students) {
+        try {
+          const { name, className } = student;
+          if (!name) continue;
+          
+          // Generate username from name (remove spaces, use first 2 parts)
+          const nameParts = name.trim().split(' ').filter((p: string) => p.length > 0);
+          const firstName = nameParts[0] || 'student';
+          const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : '';
+          
+          // Create a simple username: first_last_random
+          const randomNum = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+          const username = `${firstName}_${lastName}_${randomNum}`.replace(/\s+/g, '_').toLowerCase();
+          
+          // Generate simple password (first name + 123)
+          const password = `${firstName}123`;
+          
+          // Create user
+          await storage.createUser({
+            username,
+            password,
+            displayName: `${name} - ${className || ''}`
+          });
+          
+          results.success++;
+          results.created.push({
+            username,
+            password,
+            displayName: name,
+            className: className || ''
+          });
+        } catch (error: any) {
+          results.failed++;
+          results.errors.push(`${student.name}: ${error.message || 'خطأ غير معروف'}`);
+        }
+      }
+      
+      res.json({
+        message: `تم استيراد ${results.success} طالب بنجاح`,
+        ...results
+      });
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في الخادم" });
+    }
+  });
+
   // AI Routes (Gemini)
   app.post("/api/ai/evaluate", requireAuth, async (req, res) => {
     try {
