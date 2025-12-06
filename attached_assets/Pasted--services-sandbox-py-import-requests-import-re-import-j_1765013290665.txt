@@ -1,0 +1,59 @@
+# services/sandbox.py
+import requests
+import re
+import json
+from flask import current_app
+
+class ReplitSandbox:
+    def __init__(self):
+        self.api_url = f"https://api.replit.com/v0/projects/{current_app.config['REPLIT_PROJECT_ID']}/eval"
+        self.headers = {"Authorization": f"Bearer {current_app.config['REPLIT_API_KEY']}"}
+    
+    def _validate_code(self, code: str) -> bool:
+        """منع هجمات حقن الشيفرة"""
+        dangerous_patterns = [
+            r'import\s+(os|sys|subprocess|shutil|socket)',
+            r'eval\s*\(',
+            r'exec\s*\(',
+            r'__import__\(',
+            r'open\s*\(',
+            r'rm\s+-rf'
+        ]
+        for pattern in dangerous_patterns:
+            if re.search(pattern, code, re.IGNORECASE):
+                return False
+        return True
+    
+    def execute(self, code: str, language: str, test_cases: list):
+        if not self._validate_code(code):
+            return {"error": "كود غير آمن - تم رفض التنفيذ"}
+        
+        if language not in ["python", "java", "javascript"]:
+            return {"error": "اللغة غير مدعومة"}
+        
+        results = []
+        for case in test_cases:
+            payload = {
+                "language": language,
+                "code": code,
+                "stdin": case.get("input", ""),
+                "args": [],
+                "timeout": 10,  # ثواني
+                "memory_limit": 128  # MB
+            }
+            
+            try:
+                response = requests.post(
+                    self.api_url,
+                    headers=self.headers,
+                    json=payload,
+                    timeout=12
+                )
+                response.raise_for_status()
+                output = response.json().get("output", "").strip()
+                passed = output == case["output"].strip()
+                results.append({"input": case.get("input", ""), "output": output, "expected": case["output"], "passed": passed})
+            except Exception as e:
+                return {"error": f"فشل التنفيذ: {str(e)}"}
+        
+        return {"success": True, "results": results}
