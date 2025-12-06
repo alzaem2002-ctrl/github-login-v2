@@ -97,22 +97,22 @@ export async function saveSubmissionToNotion(
     await notion.pages.create({
       parent: { database_id: databaseId },
       properties: {
-        "Student": {
+        "الطالب": {
           title: [{ text: { content: data.studentName } }],
         },
-        "Problem": {
+        "المسألة": {
           rich_text: [{ text: { content: data.problemTitle } }],
         },
-        "Score": {
+        "الدرجة": {
           number: data.score,
         },
-        "Passed": {
+        "نجح": {
           checkbox: data.passed,
         },
-        "Feedback": {
+        "التعليق": {
           rich_text: [{ text: { content: data.feedback } }],
         },
-        "Date": {
+        "التاريخ": {
           date: { start: new Date().toISOString().split("T")[0] },
         },
       },
@@ -141,6 +141,7 @@ export async function createProblemInNotion(
     description: string;
     difficulty: string;
     functionName: string;
+    language?: string;
     testCases: { input: string; output: string }[];
   }
 ): Promise<boolean> {
@@ -148,19 +149,25 @@ export async function createProblemInNotion(
     await notion.pages.create({
       parent: { database_id: databaseId },
       properties: {
-        "Title": {
+        "الاسم": {
           title: [{ text: { content: problem.title } }],
         },
-        "Description": {
+        "الوصف": {
           rich_text: [{ text: { content: problem.description } }],
         },
-        "Difficulty": {
+        "الصعوبة": {
           select: { name: problem.difficulty },
         },
-        "FunctionName": {
+        "اللغة": {
+          select: { name: problem.language || "python" },
+        },
+        "الدالة": {
           rich_text: [{ text: { content: problem.functionName } }],
         },
-        "TestCases": {
+        "الحالة": {
+          status: { name: "نشط" },
+        },
+        "الاختبارات": {
           rich_text: [{ text: { content: JSON.stringify(problem.testCases) } }],
         },
       },
@@ -169,6 +176,40 @@ export async function createProblemInNotion(
   } catch (error) {
     console.error("Notion create problem error:", error);
     return false;
+  }
+}
+
+// Sync assignment to Notion (similar to Python NotionService)
+export async function syncAssignment(
+  databaseId: string,
+  assignmentData: {
+    title: string;
+    description: string;
+    language: string;
+  }
+): Promise<string | null> {
+  try {
+    const response = await notion.pages.create({
+      parent: { database_id: databaseId },
+      properties: {
+        "الاسم": {
+          title: [{ text: { content: assignmentData.title } }],
+        },
+        "الوصف": {
+          rich_text: [{ text: { content: assignmentData.description } }],
+        },
+        "اللغة": {
+          select: { name: assignmentData.language },
+        },
+        "الحالة": {
+          status: { name: "نشط" },
+        },
+      },
+    });
+    return response.id;
+  } catch (error) {
+    console.error("Notion sync assignment error:", error);
+    return null;
   }
 }
 

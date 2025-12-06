@@ -3,7 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { loginSchema, registerSchema, submitCodeSchema } from "@shared/schema";
 import { evaluateStudentCode, generateHint, generateProblem } from "./services/gemini";
-import { getNotionDatabases, syncProblemsFromNotion, saveSubmissionToNotion, testNotionConnection, createProblemInNotion } from "./services/notion";
+import { getNotionDatabases, syncProblemsFromNotion, saveSubmissionToNotion, testNotionConnection, createProblemInNotion, syncAssignment } from "./services/notion";
 import { executeCode } from "./services/sandbox";
 
 // Auth middleware
@@ -341,7 +341,7 @@ export async function registerRoutes(
 
   app.post("/api/notion/create-problem", requireAdmin, async (req, res) => {
     try {
-      const { databaseId, title, description, difficulty, functionName, testCases } = req.body;
+      const { databaseId, title, description, difficulty, functionName, language, testCases } = req.body;
       if (!databaseId) {
         return res.status(400).json({ error: "يرجى تحديد قاعدة البيانات" });
       }
@@ -351,12 +351,36 @@ export async function registerRoutes(
         description,
         difficulty,
         functionName,
+        language,
         testCases
       });
 
       res.json({ created });
     } catch (error) {
       res.status(500).json({ error: "حدث خطأ في إنشاء المسألة" });
+    }
+  });
+
+  app.post("/api/notion/sync-assignment", requireAdmin, async (req, res) => {
+    try {
+      const { databaseId, title, description, language } = req.body;
+      if (!databaseId) {
+        return res.status(400).json({ error: "يرجى تحديد قاعدة البيانات" });
+      }
+
+      const pageId = await syncAssignment(databaseId, {
+        title,
+        description,
+        language: language || "python"
+      });
+
+      if (pageId) {
+        res.json({ success: true, pageId });
+      } else {
+        res.status(500).json({ error: "فشل في مزامنة التمرين" });
+      }
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في مزامنة التمرين" });
     }
   });
 
