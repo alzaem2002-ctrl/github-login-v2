@@ -1,10 +1,43 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import path from "path";
+import multer from "multer";
 import { storage } from "./storage";
 import { loginSchema, registerSchema, submitCodeSchema } from "@shared/schema";
 import { evaluateStudentCode, generateHint, generateProblem } from "./services/gemini";
 import { getNotionDatabases, syncProblemsFromNotion, saveSubmissionToNotion, testNotionConnection, createProblemInNotion, syncAssignment } from "./services/notion";
 import { executeCode } from "./services/sandbox";
+
+// File upload configuration
+const UPLOAD_FOLDER = "static/media";
+const MAX_FILE_SIZE = 16 * 1024 * 1024; // 16MB
+const ALLOWED_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "mp4", "webm", "pdf"];
+
+const fileStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, UPLOAD_FOLDER);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    const ext = path.extname(file.originalname);
+    cb(null, file.fieldname + "-" + uniqueSuffix + ext);
+  },
+});
+
+const fileFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const ext = path.extname(file.originalname).toLowerCase().slice(1);
+  if (ALLOWED_EXTENSIONS.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error("امتداد الملف غير مدعوم"));
+  }
+};
+
+const upload = multer({
+  storage: fileStorage,
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter,
+});
 
 // Auth middleware
 function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -383,6 +416,30 @@ export async function registerRoutes(
       res.status(500).json({ error: "حدث خطأ في مزامنة التمرين" });
     }
   });
+
+  // File Upload Routes
+  app.post("/api/upload", requireAuth, upload.single("file"), (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ error: "لم يتم اختيار ملف" });
+      }
+
+      const fileUrl = `/static/media/${req.file.filename}`;
+      res.json({ 
+        success: true, 
+        url: fileUrl,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        size: req.file.size
+      });
+    } catch (error) {
+      res.status(500).json({ error: "حدث خطأ في رفع الملف" });
+    }
+  });
+
+  // Serve static files
+  const express = await import("express");
+  app.use("/static", express.default.static("static"));
 
   return httpServer;
 }
